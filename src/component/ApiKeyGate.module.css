@@ -1,0 +1,82 @@
+.page {
+    min-height: 100vh;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+}
+
+.card {
+    width: 100%;
+    max-width: 26rem;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 2rem;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background: var(--bg);
+    box-shadow: var(--shadow);
+    text-align: left;
+}
+
+.card h1 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: var(--text-h);
+}
+
+.card p {
+    margin: 0;
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.field label {
+    font-size: 0.85rem;
+    color: var(--text);
+}
+
+.field input {
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    font-size: 0.9rem;
+    background: var(--bg);
+    color: var(--text-h);
+    box-sizing: border-box;
+}
+
+.field input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.error {
+    margin: 0;
+    color: #e5484d;
+    font-size: 0.85rem;
+}
+
+.submit {
+    padding: 0.5rem 0.75rem;
+    border: none;
+    border-radius: 0.35rem;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.submit:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
