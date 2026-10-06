@@ -1,4 +1,5 @@
-import { getAllByDateRange } from "./apiHelper.ts";
+import { getAllPages, isWithinDateRange } from "./apiHelper.ts";
+import { getAllCases, type Case } from "./caseApiHelper.ts";
 import type { DateRange } from "./dateRangeHelper.ts";
 
 interface EvidenceUserRef {
@@ -23,6 +24,8 @@ export interface Evidence {
   completed_by?: EvidenceUserRef | null;
   completed_date?: string | null;
   created_at?: string;
+  /** The parent case's requested date, which evidence is filtered and listed by. */
+  case_requested_date?: string;
 }
 
 // The API has no first-class status field for evidence, so it's derived from how far
@@ -35,12 +38,27 @@ export function getEvidenceStatus(evidence: Evidence): string {
   return "Intake";
 }
 
-export function getEvidenceByDateRange(dateRange: DateRange): Promise<Evidence[]> {
-  return getAllByDateRange<Evidence>(
-    "/evidence",
-    {},
-    "created_at",
-    new Date(dateRange.from),
-    new Date(dateRange.to)
-  );
+/**
+ * Evidence whose parent case's requested date falls within the range. Evidence has no date of
+ * its own to filter by on the production API, so it follows its case.
+ *
+ * @param dateRange
+ * @param cases - All cases, if already loaded; fetched otherwise.
+ */
+export async function getEvidenceByDateRange(dateRange: DateRange, cases?: Case[]): Promise<Evidence[]> {
+  const from = new Date(dateRange.from);
+  const to = new Date(dateRange.to);
+  const [evidence, allCases] = await Promise.all([
+    getAllPages<Evidence>("/evidence"),
+    cases ?? getAllCases(),
+  ]);
+
+  const requestedDateByCaseId = new Map(allCases.map((c) => [c.id, c.requested_date]));
+
+  return evidence
+    .map((e) => ({
+      ...e,
+      case_requested_date: e.case_id !== undefined ? requestedDateByCaseId.get(e.case_id) : undefined,
+    }))
+    .filter((e) => isWithinDateRange(e.case_requested_date, from, to));
 }

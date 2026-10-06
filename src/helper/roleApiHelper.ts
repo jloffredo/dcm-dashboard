@@ -5,6 +5,17 @@ export interface Role {
   name: string;
 }
 
-export function getRoles(): Promise<Role[]> {
-  return get<Role[]>("/role", { length: 100, "sort-by": "name", "sort-direction": "asc" });
+// The production API returns roles as {id, value}; the local mock uses {id, name}.
+interface RawRole {
+  id: number;
+  name?: string;
+  value?: string;
+}
+
+export async function getRoles(): Promise<Role[]> {
+  // /role 404s on the production API when given any query params, so sort client-side.
+  const roles = await get<RawRole[]>("/role");
+  return roles
+    .map((role) => ({ id: role.id, name: role.name ?? role.value ?? "" }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }

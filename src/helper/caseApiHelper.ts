@@ -1,4 +1,4 @@
-import { get, getAllByDateRange } from "./apiHelper.ts";
+import { getAllPages, isWithinDateRange } from "./apiHelper.ts";
 import type { DateRange } from "./dateRangeHelper.ts";
 
 export interface Case {
@@ -16,18 +16,56 @@ export interface Case {
   agency?: { id?: number; value?: string };
 }
 
-export function getCasesByDateRange(dateRange: DateRange): Promise<Case[]> {
-  return getAllByDateRange<Case>(
-    "/case",
-    {},
-    "requested_date",
-    new Date(dateRange.from),
-    new Date(dateRange.to)
-  );
+interface CustomField {
+  field_id?: string;
+  value?: string | null;
 }
 
-// Unfiltered, for cross-referencing other records (e.g. evidence) against a case's
-// fields (like agency) regardless of whether the case itself falls in a selected date range.
-export function getAllCases(): Promise<Case[]> {
-  return get<Case[]>("/case", { length: 500 });
+// The production API returns cases with display-name keys ("Agency", "Case Type", ...) and
+// keeps most data, including the request date and status, in per-tenant custom `fields`.
+// The local mock uses the snake_case shape in Case directly.
+interface RawCase {
+  [key: string]: unknown;
+  requested_date?: string;
+  required_by_date?: string;
+  case_type?: { value?: string };
+  priority?: { value?: string };
+  agency?: { id?: number; value?: string };
+  status?: string;
+  primary_user_id?: number | null;
+  Agency?: { id?: number; value?: string };
+  "Case Type"?: { value?: string };
+  Priority?: { value?: string };
+  "Deadline Date"?: string | null;
+  fields?: Record<string, CustomField> | null;
+}
+
+const fieldValue = (raw: RawCase, name: string) => raw.fields?.[name]?.value ?? undefined;
+
+/** Maps either API response shape onto Case. */
+export function normalizeCase(raw: RawCase): Case {
+  return {
+    ...raw,
+    requested_date: raw.requested_date ?? fieldValue(raw, "Request Date"),
+    required_by_date: raw.required_by_date ?? raw["Deadline Date"] ?? undefined,
+    case_type: raw.case_type ?? raw["Case Type"],
+    priority: raw.priority ?? raw.Priority,
+    agency: raw.agency ?? raw.Agency,
+    status: raw.status ?? fieldValue(raw, "INTERNAL Case Status"),
+    primary_user_id: raw.primary_user_id ?? undefined,
+  };
+}
+
+/** Every case, regardless of date. */
+export async function getAllCases(): Promise<Case[]> {
+  const cases = await getAllPages<RawCase>("/case");
+  return cases.map(normalizeCase);
+}
+
+/** Cases whose requested date falls within the range. */
+export async function getCasesByDateRange(dateRange: DateRange): Promise<Case[]> {
+  const from = new Date(dateRange.from);
+  const to = new Date(dateRange.to);
+  const cases = await getAllCases();
+  return cases.filter((c) => isWithinDateRange(c.requested_date, from, to));
 }

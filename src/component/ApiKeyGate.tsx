@@ -24,6 +24,7 @@ const ApiKeyGate = ({ children }: ApiKeyGateProps) => {
     setApiKey(candidateKey);
 
     try {
+      // /me 404s on the production API when given any query params, so call it bare.
       await get("/me");
       window.location.reload();
     } catch (err) {

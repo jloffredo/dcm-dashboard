@@ -28,7 +28,8 @@ export async function getUsers(): Promise<User[]> {
   const [users, agencies, roles] = await Promise.all([
     get<RawUser[]>("/user", { length: 100, "sort-by": "last_name", "sort-direction": "asc" }),
     getAgencies(),
-    getRoles(),
+    // A role lookup failure shouldn't hide the users; their roles just show as "Unknown".
+    getRoles().catch(() => []),
   ]);
 
   const agencyById = new Map(agencies.map((agency) => [agency.id, agency.title]));

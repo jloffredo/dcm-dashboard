@@ -4,6 +4,10 @@
 // Configure via a .env file (see Vite's env docs):
 //   VITE_API_BASE_URL=http://localhost:8000/service/api/v1
 //   VITE_API_KEY=local-dev
+// For a remote API without CORS support, use a relative base URL and let the Vite dev server
+// proxy it (see vite.config.ts):
+//   VITE_API_BASE_URL=/service/api/v1
+//   API_PROXY_TARGET=https://example.com
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/service/api/v1';
 
@@ -53,11 +57,11 @@ export type ApiParams = Record<string, string | number | boolean | undefined | n
  * Calls a GET endpoint on the DCM API and returns the parsed JSON body.
  *
  * @param path - Endpoint path, relative to the API base (e.g. "/case", "/evidence/1").
- * @param params - Query params to append (e.g. { 'sort-by': 'requested_date' }).
+ * @param params - Query params to append (e.g. { 'sort-by': 'name' }).
  * @returns The parsed JSON response body.
  */
 export async function get<T = unknown>(path: string, params: ApiParams = {}): Promise<T> {
-  const url = new URL(`${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`);
+  const url = new URL(`${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`, window.location.origin);
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null) {
       url.searchParams.set(key, String(value));
@@ -78,63 +82,45 @@ export async function get<T = unknown>(path: string, params: ApiParams = {}): Pr
     throw new Error(`GET ${url.pathname}${url.search} failed: ${response.status} ${response.statusText}`);
   }
 
-  return response.json();
+  const body = await response.json();
+  // The production API wraps payloads as { success, message, data, filters }; the local mock
+  // returns them bare. Unwrap so callers see the same shape from both.
+  if (body && typeof body === 'object' && !Array.isArray(body) && 'success' in body && 'data' in body) {
+    return body.data as T;
+  }
+  return body as T;
 }
 
-export type ApiRecord = Record<string, unknown>;
-
-const DATE_RANGE_PAGE_SIZE = 200;
+const PAGE_SIZE = 200;
 
 /**
- * Fetches every record from a GET endpoint whose `dateField` falls within
- * [dateFrom, dateTo] (inclusive).
+ * Fetches every record from a paginated GET endpoint, following start/length until a short
+ * page comes back.
  *
- * The API has no date-range filter, so this pages through the endpoint sorted
- * ascending by `dateField` (via the existing start/length pagination) and stops
- * as soon as a page's records pass `dateTo` or the endpoint runs out of records.
- * Note this scans from the start of the sort order, so it's most efficient when
- * `dateFrom` isn't far past the oldest record.
+ * The API has no date-range filter, and its server-side sort doesn't reliably follow the dates
+ * the dashboards use (e.g. a case's "Request Date" custom field), so callers fetch everything
+ * and filter client-side (see isWithinDateRange).
  *
  * @param path - Endpoint path, relative to the API base (e.g. "/case").
- * @param params - Extra query params (e.g. other filters). start/length/sort-by/
- *   sort-direction are managed internally and will be overridden if passed here.
- * @param dateField - Name of the field to sort and filter by (e.g. "requested_date").
- * @param dateFrom - Inclusive lower bound of the date range.
- * @param dateTo - Inclusive upper bound of the date range.
+ * @param params - Extra query params. start/length are managed internally.
  */
-export async function getAllByDateRange<T extends ApiRecord = ApiRecord>(
-  path: string,
-  params: ApiParams,
-  dateField: string,
-  dateFrom: Date,
-  dateTo: Date
-): Promise<T[]> {
+export async function getAllPages<T>(path: string, params: ApiParams = {}): Promise<T[]> {
   const results: T[] = [];
   let start = 0;
 
   while (true) {
-    const page = await get<T[]>(path, {
-      ...params,
-      start,
-      length: DATE_RANGE_PAGE_SIZE,
-      'sort-by': dateField,
-      'sort-direction': 'asc'
-    });
-
-    if (page.length === 0) break;
-
-    for (const record of page) {
-      const recordDate = new Date(record[dateField] as string);
-      if (recordDate >= dateFrom && recordDate <= dateTo) {
-        results.push(record as T);
-      }
-    }
-
-    const lastDate = new Date(page[page.length - 1][dateField] as string);
-    if (lastDate > dateTo || page.length < DATE_RANGE_PAGE_SIZE) break;
-
-    start += DATE_RANGE_PAGE_SIZE;
+    const page = await get<T[]>(path, { ...params, start, length: PAGE_SIZE });
+    results.push(...page);
+    if (page.length < PAGE_SIZE) break;
+    start += PAGE_SIZE;
   }
 
   return results;
+}
+
+/** Whether `date` falls within [from, to] (inclusive). Missing or unparseable dates never match. */
+export function isWithinDateRange(date: string | null | undefined, from: Date, to: Date): boolean {
+  if (!date) return false;
+  const parsed = new Date(date);
+  return parsed >= from && parsed <= to;
 }

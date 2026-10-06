@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import CategoryPieChart from "../component/CategoryPieChart.tsx";
 import { type Column } from "../component/RecordListModal.tsx";
 import Filter from "../component/Filter.tsx";
+import Loading from "../component/Loading.tsx";
 import { getAllCases, type Case } from "../helper/caseApiHelper.ts";
-import { getDefaultDateRange } from "../helper/dateRangeHelper.ts";
+import { getDefaultDateRange, type DateRange } from "../helper/dateRangeHelper.ts";
 import {
   getEvidenceByDateRange,
   getEvidenceStatus,
@@ -18,24 +19,12 @@ const EvidenceDashboard = () => {
   const [dateRange, setDateRange] = useState(getDefaultDateRange());
   const [userId, setUserId] = useState("");
   const [agencyId, setAgencyId] = useState("");
-  const [evidence, setEvidence] = useState<Evidence[] | null>(null);
-  const [cases, setCases] = useState<Case[]>([]);
+  // Remembers which range the evidence was loaded for, so a new range shows as loading
+  // instead of leaving the previous range's charts up until the fetch finishes.
+  const [loaded, setLoaded] = useState<{ dateRange: DateRange; evidence: Evidence[] } | null>(null);
+  const evidence = loaded?.dateRange === dateRange ? loaded.evidence : null;
+  const [cases, setCases] = useState<Case[] | null>(null);
   const { users, agencies, loading: filterOptionsLoading } = useFilterOptions();
-
-  useEffect(() => {
-    let cancelled = false;
-
-    getEvidenceByDateRange(dateRange)
-      .then((result) => {
-        if (cancelled) return;
-        setEvidence(result);
-      })
-      .catch((err) => console.error("Failed to load evidence", err));
-
-    return () => {
-      cancelled = true;
-    };
-  }, [dateRange]);
 
   useEffect(() => {
     getAllCases()
@@ -43,8 +32,25 @@ const EvidenceDashboard = () => {
       .catch((err) => console.error("Failed to load cases", err));
   }, []);
 
+  // Evidence is filtered by its case's requested date, so it waits for the cases.
+  useEffect(() => {
+    if (!cases) return;
+    let cancelled = false;
+
+    getEvidenceByDateRange(dateRange, cases)
+      .then((result) => {
+        if (cancelled) return;
+        setLoaded({ dateRange, evidence: result });
+      })
+      .catch((err) => console.error("Failed to load evidence", err));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dateRange, cases]);
+
   const agencyByCaseId = useMemo(
-    () => new Map(cases.map((c) => [c.id, c.agency?.value])),
+    () => new Map((cases ?? []).map((c) => [c.id, c.agency?.value])),
     [cases]
   );
 
@@ -61,13 +67,13 @@ const EvidenceDashboard = () => {
       { header: "Type", render: (e) => e.type?.value ?? "—" },
       { header: "Status", render: (e) => getEvidenceStatus(e) },
       { header: "Assigned To", render: (e) => e.assigned_to?.name ?? "—" },
-      { header: "Created", render: (e) => formatDate(e.created_at) },
+      { header: "Case Requested", render: (e) => formatDate(e.case_requested_date) },
     ],
     [getAgency]
   );
 
   if (filterOptionsLoading) {
-    return <p>Loading...</p>;
+    return <Loading />;
   }
 
   return (
@@ -83,7 +89,7 @@ const EvidenceDashboard = () => {
         agencies={agencies}
       />
       {evidence === null ? (
-        <p>Loading...</p>
+        <Loading />
       ) : (
         <div className={classes.charts}>
           <div className={classes.chart}>

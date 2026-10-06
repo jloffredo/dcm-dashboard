@@ -3,8 +3,9 @@ import CategoryPieChart from "../component/CategoryPieChart.tsx";
 import TrendChart from "../component/TrendChart.tsx";
 import { type Column } from "../component/RecordListModal.tsx";
 import Filter from "../component/Filter.tsx";
+import Loading from "../component/Loading.tsx";
 import { getCasesByDateRange, type Case } from "../helper/caseApiHelper.ts";
-import { getDefaultDateRange } from "../helper/dateRangeHelper.ts";
+import { getDefaultDateRange, type DateRange } from "../helper/dateRangeHelper.ts";
 import { useFilterOptions } from "../hooks/useFilterOptions.ts";
 import classes from "./CaseDashboard.module.css";
 
@@ -14,7 +15,10 @@ const CaseDashboard = () => {
   const [dateRange, setDateRange] = useState(getDefaultDateRange());
   const [userId, setUserId] = useState("");
   const [agencyId, setAgencyId] = useState("");
-  const [cases, setCases] = useState<Case[] | null>(null);
+  // Remembers which range the cases were loaded for, so a new range shows as loading
+  // instead of leaving the previous range's charts up until the fetch finishes.
+  const [loaded, setLoaded] = useState<{ dateRange: DateRange; cases: Case[] } | null>(null);
+  const cases = loaded?.dateRange === dateRange ? loaded.cases : null;
   const { users, agencies, loading: filterOptionsLoading } = useFilterOptions();
 
   useEffect(() => {
@@ -23,7 +27,7 @@ const CaseDashboard = () => {
     getCasesByDateRange(dateRange)
       .then((result) => {
         if (cancelled) return;
-        setCases(result);
+        setLoaded({ dateRange, cases: result });
       })
       .catch((err) => console.error("Failed to load cases", err));
 
@@ -60,13 +64,13 @@ const CaseDashboard = () => {
     if (!cases) return cases;
     return cases.filter((c) => {
       if (userId && String(c.primary_user_id) !== userId) return false;
-      if (agencyId && String(c.agency?.id) !== agencyId) return false;
-      return true;
+      return !(agencyId && String(c.agency?.id) !== agencyId);
+
     });
   }, [cases, userId, agencyId]);
 
   if (filterOptionsLoading) {
-    return <p>Loading...</p>;
+    return <Loading />;
   }
 
   return (
@@ -82,7 +86,7 @@ const CaseDashboard = () => {
         agencies={agencies}
       />
       {filteredCases === null ? (
-        <p>Loading...</p>
+        <Loading />
       ) : (
         <div className={classes.charts}>
           <div className={classes.chart}>
@@ -132,7 +136,8 @@ const CaseDashboard = () => {
             <TrendChart
               items={filteredCases}
               dateRange={dateRange}
-              getDate={(c) => c.updated_at || c.created_at}
+              // The production API has no updated/created timestamps; fall back to the request date.
+              getDate={(c) => c.updated_at || c.created_at || c.requested_date}
               getSeries={(c) => c.status}
               label="Case Status Changes Over Time"
               columns={caseColumns}

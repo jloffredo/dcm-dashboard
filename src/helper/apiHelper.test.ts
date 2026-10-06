@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   get,
-  getAllByDateRange,
+  getAllPages,
   getApiKey,
+  isWithinDateRange,
   onUnauthorized,
   setApiKey,
   UnauthorizedError,
@@ -57,6 +58,14 @@ describe("apiHelper", () => {
       expect(options).toMatchObject({ method: "GET", headers: { "api-key": "secret-key" } });
     });
 
+    it("unwraps a { success, data } envelope", async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        jsonResponse({ success: true, message: "ok", data: [{ id: 1 }], filters: {} })
+      );
+
+      expect(await get("/case")).toEqual([{ id: 1 }]);
+    });
+
     it("appends defined params as query string entries and skips null/undefined ones", async () => {
       vi.mocked(fetch).mockResolvedValueOnce(jsonResponse([]));
 
@@ -97,65 +106,47 @@ describe("apiHelper", () => {
     });
   });
 
-  describe("getAllByDateRange", () => {
-    it("filters out-of-range records and pages until a short page is returned", async () => {
-      const fullPage = Array.from({ length: 200 }, (_, i) => ({
-        id: i + 1,
-        created_at: `2026-01-${String((i % 28) + 1).padStart(2, "0")}`,
-      }));
-      const finalPage = [
-        { id: 201, created_at: "2026-02-01" },
-        { id: 202, created_at: "2026-03-01" }, // outside the requested range, filtered out
-      ];
+  describe("getAllPages", () => {
+    it("pages with start/length until a short page is returned", async () => {
+      const fullPage = Array.from({ length: 200 }, (_, i) => ({ id: i + 1 }));
       vi.mocked(fetch)
         .mockResolvedValueOnce(jsonResponse(fullPage))
-        .mockResolvedValueOnce(jsonResponse(finalPage));
+        .mockResolvedValueOnce(jsonResponse([{ id: 201 }]));
 
-      const results = await getAllByDateRange(
-        "/log",
-        {},
-        "created_at",
-        new Date("2026-01-01"),
-        new Date("2026-02-28")
-      );
+      const results = await getAllPages("/case");
 
-      expect(fetch).toHaveBeenCalledTimes(2);
       expect(results).toHaveLength(201);
-      expect(results.some((r) => r.id === 202)).toBe(false);
+      const urls = vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url)));
+      expect(urls.map((u) => u.searchParams.get("start"))).toEqual(["0", "200"]);
+      expect(urls.every((u) => u.searchParams.get("length") === "200")).toBe(true);
     });
 
-    it("stops after the first page once records exceed dateTo", async () => {
-      const page = [
-        { id: 1, created_at: "2026-01-01" },
-        { id: 2, created_at: "2026-06-01" }, // past dateTo — should stop paging
-      ];
-      vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(page));
-
-      const results = await getAllByDateRange(
-        "/log",
-        {},
-        "created_at",
-        new Date("2026-01-01"),
-        new Date("2026-01-31")
-      );
-
-      expect(fetch).toHaveBeenCalledTimes(1);
-      expect(results).toEqual([{ id: 1, created_at: "2026-01-01" }]);
-    });
-
-    it("returns an empty array immediately when the endpoint has no records", async () => {
+    it("returns an empty array when the endpoint has no records", async () => {
       vi.mocked(fetch).mockResolvedValueOnce(jsonResponse([]));
 
-      const results = await getAllByDateRange(
-        "/log",
-        {},
-        "created_at",
-        new Date("2026-01-01"),
-        new Date("2026-01-31")
-      );
-
-      expect(results).toEqual([]);
+      expect(await getAllPages("/case")).toEqual([]);
       expect(fetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("isWithinDateRange", () => {
+    const from = new Date("2026-01-01");
+    const to = new Date("2026-01-31");
+
+    it("includes both ends of the range", () => {
+      expect(isWithinDateRange("2026-01-01", from, to)).toBe(true);
+      expect(isWithinDateRange("2026-01-31", from, to)).toBe(true);
+    });
+
+    it("excludes dates outside the range", () => {
+      expect(isWithinDateRange("2025-12-31", from, to)).toBe(false);
+      expect(isWithinDateRange("2026-02-01", from, to)).toBe(false);
+    });
+
+    it("excludes missing and unparseable dates", () => {
+      expect(isWithinDateRange(null, from, to)).toBe(false);
+      expect(isWithinDateRange(undefined, from, to)).toBe(false);
+      expect(isWithinDateRange("not a date", from, to)).toBe(false);
     });
   });
 });

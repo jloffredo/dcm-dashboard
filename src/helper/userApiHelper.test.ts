@@ -83,4 +83,17 @@ describe("getUsers", () => {
     expect(getAgencies).toHaveBeenCalledOnce();
     expect(getRoles).toHaveBeenCalledOnce();
   });
+
+  it('still returns users with "Unknown" roles when the role endpoint fails', async () => {
+    vi.mocked(get).mockResolvedValue([
+      { id: 1, username: "u", first_name: "A", last_name: "B", email: "e", agency_id: null, role_id: 4, active: true },
+    ]);
+    vi.mocked(getAgencies).mockResolvedValue([]);
+    vi.mocked(getRoles).mockRejectedValue(new Error("GET /role failed: 404 Not Found"));
+
+    const users = await getUsers();
+
+    expect(users).toHaveLength(1);
+    expect(users[0].role).toBe("Unknown");
+  });
 });
